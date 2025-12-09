@@ -1,4 +1,4 @@
-## Hi there 👋
+## 볼거 없슈
 
 <!--
 **Gimminu/Gimminu** is a ✨ _special_ ✨ repository because its `README.md` (this file) appears on your GitHub profile.
