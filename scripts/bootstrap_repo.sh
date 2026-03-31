@@ -6,6 +6,7 @@ usage() {
   cat <<'EOF'
 Usage:
   bootstrap_repo.sh --path PATH [options]
+  bootstrap_repo.sh --interactive [--path PATH]
 
 Options:
   --path PATH           Target project directory
@@ -13,6 +14,7 @@ Options:
   --description DESC    Short repo description
   --stack STACK         generic | python | node | hybrid | android (default: generic)
   --visibility VIS      public | private (default: public)
+  --interactive         Prompt for missing values and suggest defaults
   --create-github       Create/push the repo on GitHub via gh
   --skip-commit         Do not create an initial commit
   --help                Show this message
@@ -20,6 +22,7 @@ Options:
 Examples:
   ./scripts/bootstrap_repo.sh --path /Users/giminu0930/Desktop/mail-mcp-agent --stack node --create-github --description "Local IMAP mail agent with MCP tools"
   ./scripts/bootstrap_repo.sh --path /Users/giminu0930/Desktop/01_Projects/openai-realtime-transcribe --stack python
+  ./scripts/bootstrap_repo.sh --interactive --path /Users/giminu0930/Desktop/mail-mcp-agent --create-github
 EOF
 }
 
@@ -224,11 +227,125 @@ PY
   fi
 }
 
+trim() {
+  local value="$1"
+  value="${value#"${value%%[![:space:]]*}"}"
+  value="${value%"${value##*[![:space:]]}"}"
+  printf '%s' "$value"
+}
+
+infer_stack() {
+  local project_path="$1"
+  local has_python="false"
+  local has_node="false"
+  local has_android="false"
+
+  if [[ -f "$project_path/pyproject.toml" || -f "$project_path/requirements.txt" || -n "$(find "$project_path" -maxdepth 2 -type f -name '*.py' -print -quit 2>/dev/null)" ]]; then
+    has_python="true"
+  fi
+
+  if [[ -f "$project_path/package.json" || -f "$project_path/package-lock.json" || -f "$project_path/pnpm-lock.yaml" || -f "$project_path/yarn.lock" ]]; then
+    has_node="true"
+  fi
+
+  if [[ -f "$project_path/build.gradle" || -f "$project_path/build.gradle.kts" || -f "$project_path/settings.gradle" || -f "$project_path/settings.gradle.kts" || -f "$project_path/gradlew" || -d "$project_path/android" ]]; then
+    has_android="true"
+  fi
+
+  if [[ "$has_python" == "true" && "$has_node" == "true" ]]; then
+    printf '%s' "hybrid"
+  elif [[ "$has_android" == "true" ]]; then
+    printf '%s' "android"
+  elif [[ "$has_python" == "true" ]]; then
+    printf '%s' "python"
+  elif [[ "$has_node" == "true" ]]; then
+    printf '%s' "node"
+  else
+    printf '%s' "generic"
+  fi
+}
+
+infer_description() {
+  local project_path="$1"
+
+  python3 - "$project_path" <<'PY'
+import sys
+from pathlib import Path
+
+project_path = Path(sys.argv[1])
+readme_candidates = ["README.md", "README.MD", "README.txt", "README"]
+
+for candidate in readme_candidates:
+    path = project_path / candidate
+    if not path.exists():
+        continue
+    for raw_line in path.read_text(errors="ignore").splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("#"):
+            continue
+        if line.startswith("```"):
+            continue
+        if line.startswith("- ") or line.startswith("* "):
+            continue
+        print(line)
+        raise SystemExit(0)
+
+print("")
+PY
+}
+
+prompt_with_default() {
+  local prompt_text="$1"
+  local default_value="$2"
+  local result=""
+
+  if [[ -n "$default_value" ]]; then
+    read -r -p "$prompt_text [$default_value]: " result
+    result="$(trim "$result")"
+    if [[ -z "$result" ]]; then
+      result="$default_value"
+    fi
+  else
+    read -r -p "$prompt_text: " result
+    result="$(trim "$result")"
+  fi
+
+  printf '%s' "$result"
+}
+
+prompt_yes_no() {
+  local prompt_text="$1"
+  local default_value="$2"
+  local result=""
+
+  read -r -p "$prompt_text [$default_value]: " result
+  result="$(trim "$result")"
+  if [[ -z "$result" ]]; then
+    result="$default_value"
+  fi
+  result="$(printf '%s' "$result" | tr '[:upper:]' '[:lower:]')"
+
+  case "$result" in
+    y|yes)
+      printf '%s' "true"
+      ;;
+    n|no)
+      printf '%s' "false"
+      ;;
+    *)
+      printf '%s' "false"
+      ;;
+  esac
+}
+
 PATH_ARG=""
 NAME_ARG=""
 DESCRIPTION_ARG=""
 STACK_ARG="generic"
 VISIBILITY_ARG="public"
+INTERACTIVE_MODE="false"
 CREATE_GITHUB="false"
 SKIP_COMMIT="false"
 
@@ -259,6 +376,10 @@ while [[ $# -gt 0 ]]; do
       require_value "$VISIBILITY_ARG" "--visibility"
       shift 2
       ;;
+    --interactive)
+      INTERACTIVE_MODE="true"
+      shift
+      ;;
     --create-github)
       CREATE_GITHUB="true"
       shift
@@ -279,15 +400,50 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if [[ "$INTERACTIVE_MODE" == "true" && -z "$PATH_ARG" ]]; then
+  PATH_ARG="$(prompt_with_default "Project folder path" "$PWD")"
+fi
+
 if [[ -z "$PATH_ARG" ]]; then
   usage
   exit 1
 fi
 
 PROJECT_PATH="$(cd "$(dirname "$PATH_ARG")" && pwd)/$(basename "$PATH_ARG")"
-PROJECT_NAME="${NAME_ARG:-$(basename "$PROJECT_PATH")}"
 
 mkdir -p "$PROJECT_PATH"
+
+INFERRED_STACK="$(infer_stack "$PROJECT_PATH")"
+INFERRED_DESCRIPTION="$(infer_description "$PROJECT_PATH")"
+INTERACTIVE_STACK_DEFAULT="$INFERRED_STACK"
+INTERACTIVE_CREATE_DEFAULT="N"
+
+if [[ "$STACK_ARG" != "generic" ]]; then
+  INTERACTIVE_STACK_DEFAULT="$STACK_ARG"
+fi
+
+if [[ "$CREATE_GITHUB" == "true" ]]; then
+  INTERACTIVE_CREATE_DEFAULT="Y"
+fi
+
+if [[ "$INTERACTIVE_MODE" == "true" ]]; then
+  NAME_ARG="$(prompt_with_default "Repository name" "${NAME_ARG:-$(basename "$PROJECT_PATH")}")"
+  STACK_ARG="$(prompt_with_default "Stack" "$INTERACTIVE_STACK_DEFAULT")"
+  DESCRIPTION_ARG="$(prompt_with_default "Short description" "${DESCRIPTION_ARG:-$INFERRED_DESCRIPTION}")"
+  VISIBILITY_ARG="$(prompt_with_default "Visibility (public/private)" "$VISIBILITY_ARG")"
+  CREATE_GITHUB="$(prompt_yes_no "Create and push GitHub repo now?" "$INTERACTIVE_CREATE_DEFAULT")"
+else
+  if [[ "$STACK_ARG" == "generic" && "$INFERRED_STACK" != "generic" ]]; then
+    STACK_ARG="$INFERRED_STACK"
+  fi
+fi
+
+PROJECT_NAME="${NAME_ARG:-$(basename "$PROJECT_PATH")}"
+
+if [[ "$VISIBILITY_ARG" != "public" && "$VISIBILITY_ARG" != "private" ]]; then
+  echo "Visibility must be public or private" >&2
+  exit 1
+fi
 
 write_file_if_missing "$PROJECT_PATH/.gitignore" "$(build_gitignore "$STACK_ARG")"
 write_file_if_missing "$PROJECT_PATH/README.md" "$(build_readme "$PROJECT_NAME" "$DESCRIPTION_ARG" "$STACK_ARG")"

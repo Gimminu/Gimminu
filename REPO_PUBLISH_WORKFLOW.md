@@ -23,6 +23,21 @@
 gh auth login -h github.com
 ```
 
+## 가장 쉬운 사용법
+
+터미널 명령을 기억하지 않아도 된다.
+
+데스크톱의 아래 파일을 더블클릭하거나, 공개할 폴더를 그 파일 위로 드래그하면 된다.
+
+- [Publish Repo.command](/Users/giminu0930/Desktop/Publish Repo.command)
+
+이 런처는:
+
+1. 폴더를 고르게 하고
+2. repo 이름, 설명, 공개 여부를 기본값과 함께 물어보고
+3. Git 초기화와 첫 커밋을 만들고
+4. `gh` 인증이 살아 있으면 GitHub 저장소 생성과 push까지 이어진다
+
 ## 기본 사용법
 
 프로필 repo 안의 스크립트를 실행한다.
@@ -46,6 +61,13 @@ cd /Users/giminu0930/Desktop/Gimminu-profile
   --description "macOS-first realtime transcription workflow"
 ```
 
+대화형 모드도 가능하다.
+
+```bash
+cd /Users/giminu0930/Desktop/Gimminu-profile
+./scripts/bootstrap_repo.sh --interactive --path /Users/giminu0930/Desktop/mail-mcp-agent --create-github
+```
+
 ## 권장 스택 값
 
 - `python`
@@ -63,6 +85,13 @@ cd /Users/giminu0930/Desktop/Gimminu-profile
 5. Git 저장소가 없으면 `main` 브랜치로 초기화
 6. 변경사항을 스테이징하고 첫 커밋 생성
 7. `--create-github` 옵션이 있고 `gh` 인증이 살아 있으면 GitHub 저장소 생성 + push
+
+## 추천 방식
+
+평소에는 아래 둘 중 하나만 쓰면 된다.
+
+- 더블클릭: `Publish Repo.command`
+- 폴더 드래그: 프로젝트 폴더를 `Publish Repo.command` 위에 드롭
 
 ## 추천 운영 방식
 
